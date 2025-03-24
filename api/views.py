@@ -143,32 +143,80 @@ def round_robin3(processes, quantum):
 
 
 def priority_preemptive(processes):
-    processes.sort(key=lambda x: (x['arrival_time'], x['Priority']))
+    n = len(processes)
     time = 0
-    result = []
-    remaining_time = {p['id']: p['burst_time'] for p in processes}
-    completion_times = {}
-    waiting_times = {}
-    turnaround_times = {}
     completed = 0
-    while completed < len(processes):
-        available_processes = [
-            p for p in processes if p['arrival_time'] <= time and remaining_time[p['id']] > 0]
-        if available_processes:
-            current = min(available_processes, key=lambda x: x['Priority'])
-            remaining_time[current['id']] -= 1
-            if remaining_time[current['id']] == 0:
-                completed += 1
-                completion_times[current['id']] = time + 1
-                turnaround_times[current['id']
-                                 ] = completion_times[current['id']] - current['arrival_time']
-                waiting_times[current['id']
-                              ] = turnaround_times[current['id']] - current['burst_time']
-        time += 1
+    ready_queue = []
+    timeline = []
+
+    # Add helper fields
     for p in processes:
-        result.append({'id': p['id'], 'completion_time': completion_times[p['id']],
-                      'waiting_time': waiting_times[p['id']], 'turnaround_time': turnaround_times[p['id']]})
-    return result
+        p['remaining_time'] = p['burst_time']
+        p['start_time'] = None
+        p['completion_time'] = None
+
+    current_process = None
+
+    while completed < n:
+        # Add newly arrived processes to the ready queue
+        for p in processes:
+            if p['arrival_time'] == time:
+                ready_queue.append(p)
+
+        # Sort by priority, break ties with arrival_time
+        ready_queue = sorted(ready_queue, key=lambda x: (
+            x['priority'], x['arrival_time']))
+
+        if ready_queue:
+            if current_process != ready_queue[0]:
+                current_process = ready_queue[0]
+                # If new segment starts
+                if timeline and 'end_time' not in timeline[-1] and timeline[-1]['id'] == current_process['id']:
+                    # Continue segment
+                    pass
+                else:
+                    timeline.append({
+                        'id': current_process['id'],
+                        'start_time': time
+                    })
+
+            # Execute for 1 time unit
+            current_process['remaining_time'] -= 1
+
+            if current_process['start_time'] is None:
+                current_process['start_time'] = time
+
+            # If finished
+            if current_process['remaining_time'] == 0:
+                current_process['completion_time'] = time + 1
+                ready_queue.pop(0)
+                completed += 1
+                # Record the end time for this segment
+                timeline[-1]['end_time'] = time + 1
+                current_process = None
+        else:
+            # CPU is idle
+            if not timeline or timeline[-1]['id'] != 'idle':
+                timeline.append(
+                    {'id': 'idle', 'start_time': time, 'end_time': time + 1})
+            else:
+                timeline[-1]['end_time'] = time + 1
+
+        time += 1
+
+        # If still running and not preempted
+        if timeline and 'end_time' not in timeline[-1] and current_process:
+            timeline[-1]['end_time'] = time
+
+    # Calculate waiting time and turnaround time
+    for p in processes:
+        p['turnaround_time'] = p['completion_time'] - p['arrival_time']
+        p['waiting_time'] = p['turnaround_time'] - p['burst_time']
+        # Optional cleanup
+        del p['remaining_time']
+        del p['start_time']
+
+    return [timeline, processes]
 
 
 def priority_non_preemptive(processes):
@@ -200,6 +248,7 @@ class ProcessDataView(APIView):
                 results = priority_preemptive(data)
             elif algorithm == "psnp":
                 results = priority_non_preemptive(data)
+                print(results)
             elif algorithm == "rr":
                 results = round_robin3(data, quantum)
             elif algorithm == "fcfs":
@@ -207,5 +256,4 @@ class ProcessDataView(APIView):
             elif algorithm == "sjfnp":
                 results = sjf_non_preemptive(data)
             print(results)
-
         return Response(results)
