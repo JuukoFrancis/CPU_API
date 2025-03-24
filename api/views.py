@@ -23,33 +23,80 @@ def fcfs(processes):
 
 
 def sjf_preemptive(processes):
-    processes.sort(key=lambda x: (x['arrival_time'], x['burst_time']))
+    n = len(processes)
     time = 0
-    result = []
-    remaining_time = {p['id']: p['burst_time'] for p in processes}
-    completion_times = {}
-    waiting_times = {}
-    turnaround_times = {}
     completed = 0
-    while completed < len(processes):
-        available_processes = [
-            p for p in processes if p['arrival_time'] <= time and remaining_time[p['id']] > 0]
-        if available_processes:
-            current = min(available_processes,
-                          key=lambda x: remaining_time[x['id']])
-            remaining_time[current['id']] -= 1
-            if remaining_time[current['id']] == 0:
-                completed += 1
-                completion_times[current['id']] = time + 1
-                turnaround_times[current['id']
-                                 ] = completion_times[current['id']] - current['arrival_time']
-                waiting_times[current['id']
-                              ] = turnaround_times[current['id']] - current['burst_time']
-        time += 1
+    ready_queue = []
+    timeline = []
+
+    # Add helper fields
     for p in processes:
-        result.append({'id': p['id'], 'completion_time': completion_times[p['id']],
-                      'waiting_time': waiting_times[p['id']], 'turnaround_time': turnaround_times[p['id']]})
-    return result
+        p['remaining_time'] = p['burst_time']
+        p['start_time'] = None
+        p['completion_time'] = None
+
+    current_process = None
+
+    while completed < n:
+        # Add newly arrived processes to the ready queue
+        for p in processes:
+            if p['arrival_time'] == time:
+                ready_queue.append(p)
+
+        # Pick process with shortest remaining time
+        ready_queue = sorted(ready_queue, key=lambda x: (
+            x['remaining_time'], x['arrival_time']))
+
+        if ready_queue:
+            if current_process != ready_queue[0]:
+                current_process = ready_queue[0]
+                # If new segment starts
+                timeline.append({
+                    'id': current_process['id'],
+                    'start_time': time
+                })
+
+            # Execute for 1 time unit
+            current_process['remaining_time'] -= 1
+
+            if current_process['start_time'] is None:
+                current_process['start_time'] = time
+
+            # If finished
+            if current_process['remaining_time'] == 0:
+                current_process['completion_time'] = time + 1
+                ready_queue.pop(0)
+                completed += 1
+                # Record the end time for this segment
+                timeline[-1]['end_time'] = time + 1
+                current_process = None
+        else:
+            # CPU is idle
+            timeline.append(
+                {'id': 'idle', 'start_time': time, 'end_time': time + 1})
+
+        time += 1
+
+        # If still running and not preempted
+        if timeline and 'end_time' not in timeline[-1] and current_process:
+            timeline[-1]['end_time'] = time
+
+    # Calculate waiting time and turnaround time
+    for p in processes:
+        p['turnaround_time'] = p['completion_time'] - p['arrival_time']
+        p['waiting_time'] = p['turnaround_time'] - p['burst_time']
+        # Optional cleanup
+        del p['remaining_time']
+        del p['start_time']
+
+    return [{
+        'timeline': timeline,
+        'processes': processes
+    }]
+    # return [{
+    #     'timeline': timeline,
+    #     'processes': processes
+    # }]
 
 
 def sjf_non_preemptive(processes):
@@ -63,54 +110,6 @@ def sjf_non_preemptive(processes):
         result.append({'id': process['id'], 'completion_time': completion_time,
                       'waiting_time': waiting_time, 'turnaround_time': turnaround_time})
         time = completion_time
-    return result
-
-
-def round_robin2(processes, quantum):
-    """Round Robin: Execute processes in time slices"""
-    queue = sorted(processes, key=lambda x: x["arrival"])
-    time = 0
-    result = []
-    waiting = queue[:]
-
-    while waiting:
-        process = waiting.pop(0)
-        if time < process["arrival"]:
-            time = process["arrival"]
-
-        # Execute for quantum time or until complete
-        execution_time = min(process["burst"], quantum)
-        start_time = time
-        time += execution_time
-        process["burst"] -= execution_time
-
-        result.append(
-            {"pid": process["pid"], "start": start_time, "end": time})
-
-        if process["burst"] > 0:
-            waiting.append(process)
-    return result
-
-
-def round_robin(processes, quantum):
-    queue = deque(processes)
-    time = 0
-    result = []
-    waiting_times = {p['id']: 0 for p in processes}
-    turnaround_times = {}
-    while queue:
-        process = queue.popleft()
-        if process['burst_time'] > quantum:
-            time += quantum
-            process['burst_time'] -= quantum
-            queue.append(process)
-        else:
-            time += process['burst_time']
-            turnaround_times[process['id']] = time
-            waiting_times[process['id']
-                          ] = turnaround_times[process['id']] - process['burst_time']
-            result.append({'id': process['id'], 'completion_time': time,
-                          'waiting_time': waiting_times[process['id']], 'turnaround_time': turnaround_times[process['id']]})
     return result
 
 
@@ -193,6 +192,7 @@ class ProcessDataView(APIView):
             algorithm = request.data.get("algorithm")
             quantum = request.data.get("quantum")
             data = request.data.get("input_data")
+            print(data)
             results = []
             if algorithm == "sjfp":
                 results = sjf_preemptive(data)
@@ -207,5 +207,5 @@ class ProcessDataView(APIView):
             elif algorithm == "sjfnp":
                 results = sjf_non_preemptive(data)
             print(results)
-            print(algorithm)
+
         return Response(results)
